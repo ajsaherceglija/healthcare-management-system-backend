@@ -1,112 +1,115 @@
 package com.healthcare.system.healthcare.services;
 
-import com.healthcare.system.healthcare.models.Document;
-import com.healthcare.system.healthcare.models.dtos.DocumentTransferRequest;
+import com.healthcare.system.healthcare.models.dtos.DocumentDto;
+import com.healthcare.system.healthcare.models.entities.Document;
 import com.healthcare.system.healthcare.models.entities.Doctor;
 import com.healthcare.system.healthcare.models.entities.Patient;
 import com.healthcare.system.healthcare.repositories.DocumentRepository;
 import com.healthcare.system.healthcare.repositories.DoctorRepository;
 import com.healthcare.system.healthcare.repositories.PatientRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
-public interface DocumentTransferService {
-    List<Document> getAllDocuments();
-    List<Document> getDocumentsForUser(Integer userId);
-    Document sendDocument(DocumentTransferRequest request);
-    List<Document> getReceivedDocuments(Integer userId);
-    List<Document> getSentDocuments(Integer userId);
-}
-
 @Service
-class DocumentTransferServiceImpl implements DocumentTransferService {
+public class DocumentTransferService {
 
     private final DocumentRepository documentRepository;
     private final DoctorRepository doctorRepository;
     private final PatientRepository patientRepository;
 
-    public DocumentTransferServiceImpl(DocumentRepository documentRepository,
-                                       DoctorRepository doctorRepository,
-                                       PatientRepository patientRepository) {
+
+    @Autowired
+    public DocumentTransferService(DocumentRepository documentRepository,
+                                   DoctorRepository doctorRepository,
+                                   PatientRepository patientRepository) {
         this.documentRepository = documentRepository;
         this.doctorRepository = doctorRepository;
         this.patientRepository = patientRepository;
     }
 
-    private Document mapToDto(com.healthcare.system.healthcare.models.entities.Document entity) {
-        return new Document(
-                entity.getId(),
-                entity.getSender().getDid(),
-                entity.getReceiver().getPid(),
-                entity.getTitle(),
-                entity.getContent(),
-                entity.getIsForPatient(),
-                "Doctor",
-                "Patient"
-        );
-    }
-
-    @Override
-    public List<Document> getAllDocuments() {
-        return documentRepository.findAll().stream()
+    public List<DocumentDto> getAllDocuments() {
+        List<Document> documents = documentRepository.findAll();
+        return documents.stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
 
-    @Override
-    public List<Document> getDocumentsForUser(Integer userId) {
-        Doctor doctor = doctorRepository.findById(userId).orElse(null);
-        if (doctor != null) {
-            return documentRepository.findBySender(doctor).stream()
-                    .map(this::mapToDto)
-                    .collect(Collectors.toList());
+    public List<DocumentDto> getDocumentsForUser(Integer userId, String role) {
+        List<Document> documents;
+        if ("DOCTOR".equalsIgnoreCase(role)) {
+            documents = documentRepository.findBySender_Did(userId);
+        } else if ("PATIENT".equalsIgnoreCase(role)) {
+            documents = documentRepository.findByReceiver_Pid(userId);
+        } else {
+            throw new IllegalArgumentException("Invalid role: " + role);
         }
 
-        Patient patient = patientRepository.findById(userId).orElse(null);
-        if (patient != null) {
-            return documentRepository.findByReceiver(patient).stream()
-                    .map(this::mapToDto)
-                    .collect(Collectors.toList());
+        return documents.stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toList());
+    }
+
+
+    public DocumentDto getDocumentById(Integer id){
+        Optional<Document> documentOpt = documentRepository.findById(id);
+        if(documentOpt.isEmpty()) {
+            throw new IllegalArgumentException("Document not found with ID: " + id);
+        }
+        return mapToDto(documentOpt.get());
+    }
+
+    public void deleteDocument(Integer id){
+        if (!documentRepository.existsById(id)) {
+            throw new IllegalArgumentException("Cannot delete. Document not found with ID: " + id);
+        }
+        documentRepository.deleteById(id);
+    }
+
+    private DocumentDto mapToDto(Document document) {
+        DocumentDto dto = new DocumentDto();
+        dto.setId(document.getId());
+        dto.setTitle(document.getTitle());
+        dto.setContent(document.getContent());
+        dto.setIsForPatient(document.getIsForPatient());
+        dto.setSenderId(document.getSender() != null ? document.getSender().getDid() : null);
+        dto.setReceiverId(document.getReceiver() != null ? document.getReceiver().getPid() : null);
+        dto.setFileName(document.getFileName());
+        return dto;
+    }
+
+    public DocumentDto sendDocument(DocumentDto request) {
+        Document document = new Document();
+
+        document.setTitle(request.getTitle());
+        document.setContent(request.getContent());
+        document.setFileName(request.getFileName());
+
+        if (request.getSenderId() != null) {
+            Doctor sender = doctorRepository.findById(request.getSenderId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid senderId"));
+            document.setSender(sender);
         }
 
-        return List.of();
+        if (request.getReceiverId() != null) {
+            Patient receiver = patientRepository.findById(request.getReceiverId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid receiverId"));
+            document.setReceiver(receiver);
+        }
+
+        document.setIsForPatient(true);
+
+        Document saved = documentRepository.save(document);
+
+        return mapToDto(saved);
     }
 
-    @Override
-    public List<Document> getReceivedDocuments(Integer userId) {
-        Patient patient = patientRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("Patient not found"));
-        return documentRepository.findByReceiver(patient).stream()
-                .map(this::mapToDto)
-                .collect(Collectors.toList());
-    }
 
-    @Override
-    public List<Document> getSentDocuments(Integer userId) {
-        Doctor doctor = doctorRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("Doctor not found"));
-        return documentRepository.findBySender(doctor).stream()
-                .map(this::mapToDto)
-                .collect(Collectors.toList());
-    }
-
-    @Override
-    public Document sendDocument(DocumentTransferRequest request) {
-        Doctor sender = doctorRepository.findById(request.getSenderId())
-                .orElseThrow(() -> new RuntimeException("Sender doctor not found"));
-
-        Patient receiver = patientRepository.findById(request.getReceiverId())
-                .orElseThrow(() -> new RuntimeException("Receiver patient not found"));
-
-        com.healthcare.system.healthcare.models.entities.Document entity = new com.healthcare.system.healthcare.models.entities.Document();
-        entity.setSender(sender);
-        entity.setReceiver(receiver);
-        entity.setTitle(request.getTitle());
-        entity.setContent(request.getContent());
-        entity.setIsForPatient(request.isForPatient());
-
-        return mapToDto(documentRepository.save(entity));
-    }
 }

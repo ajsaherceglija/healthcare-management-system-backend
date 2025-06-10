@@ -15,14 +15,14 @@ import com.healthcare.system.healthcare.repositories.UserRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
 public class PatientAppointmentService {
-//    private List<AppointmentDto> appointments = new ArrayList<>();
-//    private Integer counter = 4;
+
 
     private AppointmentsRepository appointmentsRepository;
     private DepartmentsRepository departmentsRepository;
@@ -44,7 +44,7 @@ public class PatientAppointmentService {
         List<Appointment> appointments = appointmentsRepository.findByPatientAndStatusIn(uid, List.of("upcoming", "accepted"));
 
         if (appointments.isEmpty()) {
-            throw new RuntimeException("No patient appointments found");
+            return Collections.emptyList();
         }
 
         return appointments.stream()
@@ -63,7 +63,7 @@ public class PatientAppointmentService {
     public AppointmentDto bookAppointment(AppointmentDto newAppointment, Integer uid) {
         Appointment appointment = new Appointment();
         appointment.setPatient(uid);
-        appointment.setDoctor(newAppointment.getDoctor());
+        appointment.setDoctor(newAppointment.getDoctorId());
         appointment.setRoom(null);
         appointment.setNote(newAppointment.getNote());
         appointment.setDate(null);
